@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 巡檢員</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy-950:#070E1B;
+  --navy-900:#0B1628;
+  --navy-800:#12213A;
+  --navy-700:#1C2F50;
+  --navy-600:#2A4270;
+  --steel:#5B7FB8;
+  --accent:#7FA6E8;
+  --paper:#F3F4F6;
+  --paper-2:#E7E9ED;
+  --line:#D5D9E0;
+  --ink:#0E1A2E;
+  --ink-2:#3A4658;
+  --ink-3:#6B7586;
+  --mute-d:#8C97A8;
+  --ok:#3FAE86;
+  --bad:#E25A5A;
+  --warn:#E0A341;
+  --sans:"Inter","Noto Sans TC",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --pad-x:clamp(28px,6vw,112px);
+  --pad-y:clamp(28px,7vh,88px);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--navy-950);overflow:hidden}
+body{font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"tnum" 1}
+
+/* ---------- Deck ---------- */
+.deck{position:relative;width:100vw;height:100vh;overflow:hidden}
+.slide{
+  position:absolute;inset:0;min-height:100vh;
+  padding:var(--pad-y) var(--pad-x);
+  display:flex;flex-direction:column;
+  background:var(--paper);
+  opacity:0;visibility:hidden;
+  transform:translateX(40px);
+  transition:opacity .55s cubic-bezier(.2,.7,.2,1),transform .55s cubic-bezier(.2,.7,.2,1),visibility 0s linear .55s;
+}
+.slide.prev{transform:translateX(-40px)}
+.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .55s cubic-bezier(.2,.7,.2,1),transform .55s cubic-bezier(.2,.7,.2,1),visibility 0s}
+.slide.dark{background:var(--navy-900);color:#E9EDF4}
+.slide.dark .muted{color:var(--mute-d)}
+
+/* staged reveal */
+.slide .r{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+.slide.active .r{opacity:1;transform:none}
+.slide.active .r:nth-child(1){transition-delay:.08s}.slide.active .r:nth-child(2){transition-delay:.16s}
+.slide.active .r:nth-child(3){transition-delay:.24s}.slide.active .r:nth-child(4){transition-delay:.32s}
+.slide.active .r:nth-child(5){transition-delay:.40s}.slide.active .r:nth-child(6){transition-delay:.48s}
+
+/* ---------- HUD ---------- */
+.hud{position:fixed;top:clamp(18px,3.4vh,34px);right:var(--pad-x);z-index:20;
+  font-family:var(--mono);font-size:14px;letter-spacing:.08em;color:var(--ink-3);
+  display:flex;align-items:center;gap:10px;mix-blend-mode:normal;transition:color .4s}
+.hud b{font-weight:700;color:var(--ink);font-size:18px;transition:color .4s}
+.hud .sep{opacity:.5}
+body.on-dark .hud{color:var(--mute-d)}
+body.on-dark .hud b{color:#fff}
+.brand{position:fixed;top:clamp(18px,3.4vh,34px);left:var(--pad-x);z-index:20;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);font-weight:600;transition:color .4s}
+body.on-dark .brand{color:var(--mute-d)}
+.progress{position:fixed;left:0;bottom:0;height:3px;background:var(--steel);z-index:20;transition:width .5s cubic-bezier(.2,.7,.2,1)}
+.hint{position:fixed;bottom:16px;right:var(--pad-x);z-index:20;font-size:12px;color:var(--ink-3);font-family:var(--mono);letter-spacing:.04em;opacity:.75;transition:opacity .6s,color .4s}
+body.on-dark .hint{color:var(--mute-d)}
+.hint kbd{font-family:var(--mono);border:1px solid currentColor;border-radius:4px;padding:0 5px;margin:0 2px;font-size:11px}
+.hint.hide{opacity:0}
+
+/* notes drawer */
+.notes{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(7,14,27,.96);color:#DCE3EE;
+  padding:22px var(--pad-x) 30px;font-size:clamp(15px,1.25vw,19px);line-height:1.75;
+  transform:translateY(100%);transition:transform .35s ease;border-top:1px solid var(--navy-700);backdrop-filter:blur(6px)}
+.notes.open{transform:none}
+.notes #notesBody{white-space:pre-line;max-height:42vh;overflow-y:auto}
+.notes .cue{color:var(--warn);font-weight:600}
+.notes .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--accent);margin-bottom:8px;text-transform:uppercase}
+
+/* ---------- Typography ---------- */
+.eyebrow{font-family:var(--mono);font-size:clamp(11px,.9vw,14px);letter-spacing:.22em;text-transform:uppercase;color:var(--steel);font-weight:500;margin-bottom:clamp(12px,2vh,22px);display:flex;align-items:center;gap:12px}
+.eyebrow::before{content:"";width:28px;height:1px;background:currentColor}
+.dark .eyebrow{color:var(--accent)}
+h1{font-size:clamp(34px,4.6vw,76px);line-height:1.12;font-weight:900;letter-spacing:-.015em}
+h2{font-size:clamp(28px,3.1vw,52px);line-height:1.2;font-weight:800;letter-spacing:-.01em}
+h3{font-size:clamp(18px,1.5vw,24px);font-weight:700;line-height:1.35}
+p,li{font-size:clamp(16px,1.35vw,22px);line-height:1.7;color:var(--ink-2)}
+.dark p,.dark li{color:#C3CBD8}
+.lead{font-size:clamp(18px,1.6vw,26px);line-height:1.6;color:var(--ink-2);max-width:62ch}
+.dark .lead{color:#B9C3D3}
+.muted{color:var(--ink-3)}
+.mono{font-family:var(--mono)}
+.hl{color:var(--steel)}
+.dark .hl{color:var(--accent)}
+.head{margin-top:clamp(22px,4vh,48px);margin-bottom:clamp(22px,4.5vh,54px)}
+.body{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:clamp(18px,2.4vw,40px)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(16px,2vw,32px)}
+
+/* ---------- Components ---------- */
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:clamp(20px,2.2vw,36px)}
+.dark .card{background:var(--navy-800);border-color:var(--navy-700)}
+.card .k{font-family:var(--mono);font-size:12px;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase;margin-bottom:14px}
+.dark .card .k{color:var(--mute-d)}
+.card h3{margin-bottom:10px}
+.tag{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:500;padding:3px 9px;border-radius:5px;letter-spacing:.04em}
+.tag.bad{background:rgba(226,90,90,.12);color:#C24444}
+.tag.ok{background:rgba(63,174,134,.13);color:#25845F}
+.tag.info{background:rgba(91,127,184,.13);color:var(--navy-600)}
+.dark .tag.info{color:var(--accent);background:rgba(127,166,232,.12)}
+.rule{height:1px;background:var(--line);margin:clamp(14px,2.4vh,26px) 0}
+.dark .rule{background:var(--navy-700)}
+
+/* Cover */
+.cover{justify-content:space-between;background:
+  radial-gradient(1200px 600px at 85% 110%,rgba(91,127,184,.16),transparent 60%),var(--navy-900)}
+.cover .grid-bg{position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+  background-size:64px 64px;mask-image:linear-gradient(180deg,transparent,#000 30%,#000 70%,transparent)}
+.cover h1{max-width:18ch;color:#fff}
+.cover .sub{margin-top:28px;font-size:clamp(17px,1.55vw,25px);color:#AEB9CB;max-width:46ch;line-height:1.6}
+.cover .meta{display:flex;gap:48px;font-size:14px;color:var(--mute-d);border-top:1px solid var(--navy-700);padding-top:22px;position:relative}
+.cover .meta b{display:block;color:#E9EDF4;font-size:17px;font-weight:600;margin-top:4px}
+
+/* Agenda table */
+.agenda{width:100%;border-collapse:collapse}
+.agenda td{padding:clamp(12px,2.1vh,22px) 12px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:clamp(14px,1.2vw,19px);color:var(--ink-2)}
+.agenda tr:first-child td{border-top:1px solid var(--ink)}
+.agenda .no{font-family:var(--mono);color:var(--steel);font-weight:700;width:56px}
+.agenda .sec{font-weight:700;color:var(--ink);width:22%}
+.agenda .time{font-family:var(--mono);white-space:nowrap;width:130px}
+.agenda .bar{width:22%}
+.agenda .bar span{display:block;height:6px;border-radius:3px;background:var(--navy-700)}
+.agenda tr.peak .bar span{background:var(--steel)}
+
+/* Contrast compare */
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
+.vs > div{padding:clamp(22px,2.6vw,40px)}
+.vs > div + div{border-left:1px solid var(--line)}
+.status-row{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:clamp(13px,1.05vw,16px);padding:10px 0;border-bottom:1px dashed var(--line);color:var(--ink-2)}
+.status-row:last-child{border-bottom:0}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.dot.g{background:var(--ok)}.dot.r{background:var(--bad)}
+.blank-screen{margin-top:16px;height:clamp(110px,18vh,190px);border:1px solid var(--line);border-radius:8px;background:#fff;position:relative;overflow:hidden}
+.blank-screen .bar{height:22px;background:var(--paper-2);border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:center;padding:0 9px}
+.blank-screen .bar i{width:7px;height:7px;border-radius:50%;background:#C9CED6}
+.blank-screen .msg{position:absolute;inset:22px 0 0;display:grid;place-items:center;color:#B4BAC4;font-family:var(--mono);font-size:13px}
+
+/* Evolution */
+.evo{display:grid;grid-template-columns:1fr auto 1fr;gap:clamp(16px,2vw,32px);align-items:stretch;margin-bottom:clamp(20px,4vh,44px)}
+.evo .arrow{display:grid;place-items:center;color:var(--steel);font-size:28px}
+.evo .card.old{background:var(--paper-2);border-style:dashed}
+.evo .card.old code{text-decoration:line-through;text-decoration-color:rgba(226,90,90,.6)}
+code.inline{font-family:var(--mono);font-size:.86em;background:var(--paper-2);padding:2px 7px;border-radius:5px;color:var(--ink)}
+.dim-card .num{font-family:var(--mono);font-size:13px;color:var(--steel);font-weight:700;letter-spacing:.1em}
+.dim-card h3{margin:10px 0 6px}
+.dim-card p{font-size:clamp(14px,1.1vw,17px)}
+
+/* Architecture flow */
+.flow{display:grid;grid-template-columns:repeat(3,1fr) 1.35fr;gap:clamp(10px,1.2vw,18px);align-items:stretch}
+.node{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;padding:clamp(14px,1.5vw,22px)}
+.node .s{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-3);margin-bottom:8px}
+.node h3{font-size:clamp(15px,1.2vw,19px);margin-bottom:6px}
+.node p{font-size:clamp(13px,1vw,15px);line-height:1.55}
+.node:not(:last-child)::after{content:"";position:absolute;right:calc(-1 * clamp(10px,1.2vw,18px));top:50%;width:clamp(10px,1.2vw,18px);height:1px;background:var(--steel)}
+.branch{display:grid;grid-template-rows:auto 1fr;gap:10px}
+.branch .pass{border-left:3px solid var(--ok)}
+.branch .fail{border-left:3px solid var(--bad);padding:clamp(14px,1.5vw,22px)}
+.fail ol{list-style:none;counter-reset:f}
+.fail li{counter-increment:f;font-size:clamp(13px,1vw,15px);line-height:1.5;padding:7px 0;border-bottom:1px dashed var(--line);display:flex;gap:10px}
+.fail li:last-child{border-bottom:0}
+.fail li::before{content:counter(f);font-family:var(--mono);font-weight:700;color:var(--bad);font-size:12px;min-width:12px;padding-top:2px}
+.callout{margin-top:clamp(18px,3.6vh,40px);display:flex;gap:18px;align-items:flex-start;padding:clamp(16px,2vw,26px) clamp(18px,2vw,30px);background:var(--navy-900);color:#DDE4EF;border-radius:12px}
+.callout .q{font-size:40px;line-height:1;color:var(--accent);font-family:Georgia,serif}
+.callout p{color:#C9D2E0;font-size:clamp(15px,1.2vw,19px)}
+
+/* Code */
+.code{background:var(--navy-950);border:1px solid var(--navy-700);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.code .ttl{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--navy-700);font-family:var(--mono);font-size:12px;color:var(--mute-d);letter-spacing:.04em}
+.code pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:clamp(11.5px,.92vw,15px);line-height:1.65;color:#D4DCEA;overflow:auto;white-space:pre}
+.c-k{color:#8FB2F0}.c-s{color:#9ED3B4}.c-c{color:#5F6E86;font-style:italic}.c-f{color:#E8C27A}.c-n{color:#E39B9B}
+.pillars{display:flex;gap:clamp(10px,1.4vw,22px);margin-top:clamp(16px,3vh,32px)}
+.pillar{flex:1;display:flex;align-items:center;gap:14px;padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.pillar .n{font-family:var(--mono);font-weight:700;color:var(--steel);font-size:20px}
+.pillar span{font-size:clamp(14px,1.1vw,17px);font-weight:600;color:var(--ink)}
+
+/* Demo */
+.demo{display:grid;grid-template-columns:1.15fr 1fr;gap:clamp(14px,1.6vw,26px);flex:1;min-height:0}
+.term{background:#060B15;border:1px solid var(--navy-700);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.term .ttl{display:flex;gap:7px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--navy-700);font-family:var(--mono);font-size:12px;color:var(--mute-d)}
+.term .ttl i{width:10px;height:10px;border-radius:50%;background:var(--navy-700)}
+.term .ttl em{margin-left:10px;font-style:normal}
+.term .out{padding:18px 20px;font-family:var(--mono);font-size:clamp(12.5px,1.02vw,16.5px);line-height:1.85;color:#C9D3E3;overflow:auto}
+.term .ln{opacity:0;transform:translateY(4px);transition:opacity .3s ease,transform .3s ease;white-space:pre-wrap}
+.slide.active .term .ln{opacity:1;transform:none}
+.term .p{color:var(--accent)}
+.term .g{color:#6FD3A6}.term .e{color:#F07B7B}.term .y{color:#E9C17A}.term .d{color:#5F6E86}
+.term .cursor{display:inline-block;width:9px;height:1.1em;background:var(--accent);vertical-align:text-bottom;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.side{display:flex;flex-direction:column;gap:clamp(12px,1.4vw,20px);min-height:0}
+.side .card{padding:clamp(16px,1.6vw,26px)}
+.side h3{font-size:clamp(16px,1.3vw,21px)}
+.side p,.side li{font-size:clamp(14px,1.08vw,17px);line-height:1.65}
+.side ul{padding-left:1.1em}
+.gl{background:#fff;border:1px solid var(--navy-700);border-radius:12px;overflow:hidden;color:var(--ink)}
+.gl .bar{background:#F5F6F8;border-bottom:1px solid var(--line);padding:10px 16px;font-size:13px;color:var(--ink-3);display:flex;justify-content:space-between;font-family:var(--mono)}
+.gl .mr{padding:16px 18px;display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid var(--line)}
+.gl .mr .ic{width:22px;height:22px;border-radius:50%;background:rgba(63,174,134,.15);border:1.5px solid var(--ok);flex:none;margin-top:3px}
+.gl .mr b{font-size:clamp(14px,1.1vw,17px);display:block}
+.gl .mr small{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.diff{font-family:var(--mono);font-size:clamp(12px,1vw,15px);line-height:1.8}
+.diff div{padding:2px 16px}
+.diff .m{background:#FDECEC;color:#A33}
+.diff .a{background:#E6F5EE;color:#1F7350}
+.diff .c{color:var(--ink-3)}
+.quote-big{font-size:clamp(17px,1.45vw,23px);line-height:1.6;color:#E6EBF3;font-weight:500}
+.quote-big .hl{font-weight:700}
+.badge-step{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;margin-bottom:8px}
+
+/* Cost */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink);border-bottom:1px solid var(--line)}
+.stat{padding:clamp(20px,3.6vh,40px) clamp(14px,1.8vw,30px) clamp(20px,3.6vh,40px) 0}
+.stat + .stat{padding-left:clamp(14px,1.8vw,30px);border-left:1px solid var(--line)}
+.stat .v{font-family:var(--sans);font-size:clamp(40px,5.2vw,88px);font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--ink)}
+.stat .v small{font-size:.38em;font-weight:600;color:var(--ink-3);letter-spacing:0;margin-left:6px}
+.stat .v.acc{color:var(--steel)}
+.stat .l{margin-top:14px;font-size:clamp(14px,1.1vw,17px);color:var(--ink-2)}
+.stat .f{margin-top:6px;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.sec-list{display:grid;grid-template-columns:1fr 1fr;gap:clamp(14px,1.8vw,28px);margin-top:clamp(20px,4vh,44px)}
+.sec-item{display:flex;gap:16px;align-items:flex-start}
+.sec-item .ic{flex:none;width:38px;height:38px;border-radius:9px;background:var(--navy-900);color:var(--accent);display:grid;place-items:center}
+.sec-item h3{font-size:clamp(16px,1.25vw,20px);margin-bottom:4px}
+.sec-item p{font-size:clamp(14px,1.08vw,17px)}
+
+/* Roadmap */
+.road{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(14px,1.8vw,28px);position:relative}
+.road::before{content:"";position:absolute;left:0;right:0;top:19px;height:1px;background:var(--line)}
+.phase{position:relative}
+.phase .pin{width:39px;height:39px;border-radius:50%;background:var(--paper);border:1.5px solid var(--steel);display:grid;place-items:center;font-family:var(--mono);font-weight:700;color:var(--steel);font-size:14px;position:relative;z-index:1}
+.phase:last-child .pin{background:var(--navy-900);border-color:var(--navy-900);color:#fff}
+.phase .k{font-family:var(--mono);font-size:12px;letter-spacing:.16em;color:var(--ink-3);margin:22px 0 6px;text-transform:uppercase}
+.phase h3{font-size:clamp(20px,1.8vw,28px);margin-bottom:12px}
+.phase p{font-size:clamp(15px,1.15vw,18px)}
+.phase .ex{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line);font-size:14px;color:var(--ink-3)}
+
+/* Closing */
+.closing{justify-content:center;background:radial-gradient(900px 500px at 50% 120%,rgba(91,127,184,.18),transparent 60%),var(--navy-900)}
+.closing h1{font-size:clamp(36px,5.2vw,86px);max-width:16ch;color:#fff}
+.closing h1 .soft{color:#7D8AA1;font-weight:700}
+
+/* QA */
+.qa{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--ink)}
+.qa-item{display:grid;grid-template-columns:72px 1fr 1.5fr;gap:clamp(14px,2vw,32px);padding:clamp(14px,2.6vh,26px) 0;border-bottom:1px solid var(--line);align-items:start}
+.qa-item .qn{font-family:var(--mono);font-weight:700;color:var(--steel);font-size:clamp(18px,1.5vw,24px)}
+.qa-item h3{font-size:clamp(16px,1.3vw,21px);color:var(--ink)}
+.qa-item p{font-size:clamp(14px,1.05vw,17px);line-height:1.7}
+.qa-item p b{color:var(--ink)}
+
+/* Responsive */
+/* ---------- v2 additions ---------- */
+.tl{display:grid;grid-template-columns:120px 1fr;gap:clamp(14px,2vw,28px);align-items:center;padding:clamp(16px,3vh,30px) 0;border-bottom:1px solid var(--line)}
+.tl:first-child{border-top:1px solid var(--ink)}
+.tl .who{font-weight:800;font-size:clamp(16px,1.3vw,20px);color:var(--ink)}
+.tl .who small{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-3);font-weight:500;margin-top:4px}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+.step{position:relative;padding:12px 16px 12px 0}
+.step::before{content:"";display:block;width:11px;height:11px;border-radius:50%;background:var(--paper);border:2px solid var(--ink-3);margin-bottom:12px;position:relative;z-index:1}
+.step::after{content:"";position:absolute;left:11px;right:0;top:17px;height:2px;background:var(--line)}
+.step:last-child::after{display:none}
+.step b{display:block;font-size:clamp(15px,1.2vw,19px);color:var(--ink);margin-bottom:2px}
+.step span{font-size:clamp(13px,1vw,15px);color:var(--ink-3)}
+.tl.bad .step.hot::before{background:var(--bad);border-color:var(--bad)}
+.tl.bad .step.hot b{color:#C24444}
+.tl.good .step::before{border-color:var(--steel)}
+.tl.good .step.hot::before{background:var(--ok);border-color:var(--ok)}
+.tl.good .step.hot b{color:#25845F}
+
+.caps{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(16px,2vw,32px)}
+.cap{border-top:2px solid var(--ink);padding-top:clamp(16px,3vh,28px)}
+.cap .big{font-size:clamp(48px,5.4vw,92px);font-weight:900;line-height:1;color:var(--navy-900);letter-spacing:-.02em}
+.cap .big em{font-style:normal;color:var(--steel)}
+.cap .en{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--ink-3);margin:12px 0 14px;text-transform:uppercase}
+.cap h3{margin-bottom:8px}
+.cap p{font-size:clamp(14px,1.1vw,17px)}
+.facts{display:flex;flex-wrap:wrap;gap:10px 28px;margin-top:clamp(22px,4.5vh,48px);padding-top:18px;border-top:1px solid var(--line)}
+.facts span{font-size:clamp(14px,1.1vw,17px);color:var(--ink-2);display:flex;align-items:center;gap:9px}
+.facts span::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--steel)}
+
+.checks{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.5vw,22px)}
+.chk{background:#fff;border:1px solid var(--line);border-radius:12px;padding:clamp(16px,1.8vw,26px)}
+.chk .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.chk .num{font-family:var(--mono);font-size:12px;color:var(--steel);font-weight:700;letter-spacing:.1em}
+.chk h3{font-size:clamp(17px,1.35vw,21px);margin-bottom:6px}
+.chk p{font-size:clamp(13.5px,1.05vw,16px);line-height:1.6}
+.chk .eg{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font-family:var(--mono);font-size:clamp(11.5px,.9vw,13.5px);color:var(--ink-3)}
+
+.guard{margin-top:clamp(18px,3.6vh,40px);display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center;padding:clamp(16px,2vw,24px) clamp(18px,2vw,30px);background:var(--navy-900);border-radius:12px}
+.guard .tag{background:rgba(127,166,232,.15);color:var(--accent)}
+.guard p{color:#C9D2E0;font-size:clamp(15px,1.2vw,19px)}
+.guard p b{color:#fff}
+.formula{font-family:var(--mono);font-size:clamp(13px,1vw,15px);color:var(--ink-3);margin-top:14px}
+.note-s{font-size:13px;color:var(--ink-3);margin-top:12px}
+@media (max-width:860px){
+  .tl,.steps,.caps,.checks,.guard{grid-template-columns:1fr}
+  .step::after{display:none}
+}
+@media (max-width:860px){
+  .grid2,.grid3,.vs,.evo,.flow,.demo,.stats,.sec-list,.road,.qa-item,.pillars{grid-template-columns:1fr;display:grid}
+  .vs > div + div{border-left:0;border-top:1px solid var(--line)}
+  .evo .arrow{transform:rotate(90deg)}
+  .node:not(:last-child)::after{display:none}
+  .stat + .stat{padding-left:0;border-left:0;border-top:1px solid var(--line)}
+  .road::before{display:none}
+  .slide{overflow-y:auto}
+  .agenda .bar{display:none}
+  .hint{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media print{
+  html,body{overflow:visible;height:auto}
+  .slide{position:relative;opacity:1;visibility:visible;transform:none;height:100vh;page-break-after:always}
+  .slide .r,.term .ln{opacity:1;transform:none}
+  .hud,.progress,.hint,.notes,.brand{display:none}
+}
+/* 排程比較表 */
+.cmp{width:100%;border-collapse:collapse;font-size:clamp(13px,1.02vw,16px)}
+.cmp th,.cmp td{padding:clamp(7px,1.25vh,13px) 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;line-height:1.5;color:var(--ink-2)}
+.cmp thead th{border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);color:var(--ink);font-size:clamp(14px,1.12vw,18px);font-weight:800}
+.cmp thead th .tag{margin-left:8px;vertical-align:middle}
+.cmp td{width:22%}
+.cmp tbody th{font-family:var(--mono);font-size:clamp(11px,.85vw,13px);letter-spacing:.06em;color:var(--ink-3);font-weight:600;white-space:nowrap;width:12%}
+.cmp td.y{color:#25845F;font-weight:600}
+.cmp td.n{color:#C24444}
+.cmp .grp th{border-bottom:0;padding-bottom:0}
+@media (max-width:860px){.cmp{font-size:12px}.cmp th,.cmp td{padding:6px}}
+</style>
+</head>
+<body>
+
+<div class="brand">AI 巡檢員 · 技術分享</div>
+<div class="hud" aria-live="polite"><b id="cur">01</b><span class="sep">/</span><span id="tot">00</span></div>
+<div class="progress" id="progress"></div>
+<div class="hint" id="hint"><kbd>←</kbd><kbd>→</kbd> 換頁 · <kbd>F</kbd> 全螢幕 · <kbd>Shift</kbd>+<kbd>N</kbd> 講稿</div>
+<div class="notes" id="notes"><div class="lbl" id="notesLbl">Speaker Notes · 講稿</div><div id="notesBody"></div></div>
+
+<main class="deck" id="deck">
+
+<!-- 01 封面 -->
+<section class="slide dark cover" data-notes="大家好，我是 Josh。
+先問大家一個問題：有沒有遇過這種狀況——後端監控全部綠燈，API 都回 200，結果客戶打來說「列表怎麼少了幾筆」「這個欄位怎麼顯示 NaN」？
+這種問題頁面不會報錯，監控也看不到，通常都是使用者先發現。
+今天要分享的，就是我們怎麼把「先發現的人」換成自己：一個每天像使用者一樣打開頁面、檢查內容對不對的 AI 巡檢員。它已經在 XQ Lab 的兩個產品上實際跑起來，等一下會現場示範。" data-time="1 分鐘">
+  <div class="grid-bg"></div>
+  <div></div>
+  <div style="position:relative">
+    <div class="eyebrow r">Playwright × 規則檢查 × Claude</div>
+    <h1 class="r"><span class="hl">AI 巡檢員</span><br>在客戶之前發現網頁問題</h1>
+    <p class="sub r">每天自動打開實際頁面，檢查內容是否正常，有異常就附上證據通知團隊；前端 bug 直接備好修復 MR</p>
+  </div>
+  <div class="meta r">
+    <div>講者<b>Josh Chang</b></div>
+    <div>時長<b>25 分鐘 + 5 分鐘 Q&amp;A</b></div>
+    <div>形式<b>技術分享 · 現場示範</b></div>
+  </div>
+</section>
+
+<!-- 02 議程 -->
+<section class="slide" data-notes="今天大概分五段。
+先花幾分鐘講為什麼這類問題總是客戶先發現；接著講巡檢員的三個原則、它檢查什麼、怎麼運作；中間是現場示範，用洞見日報當案例，包含一個 10/5 真的抓到的問題；最後講成本、安全、排程工具怎麼選，以及怎麼套到你自己的專案。
+最後留 5 分鐘給大家提問。" data-time="0.5 分鐘">
+  <div class="head">
+    <div class="eyebrow r">Agenda · 25 + 5 分鐘</div>
+    <h2 class="r">今天的內容</h2>
+  </div>
+  <div class="body">
+    <table class="agenda r">
+      <tr><td class="no">01</td><td class="sec">為什麼總是客戶先發現</td><td class="time">0 – 5 min</td><td>系統監控看得到「活著」，看不到「內容對不對」</td><td class="bar"><span style="width:50%"></span></td></tr>
+      <tr><td class="no">02</td><td class="sec">AI 巡檢員如何運作</td><td class="time">5 – 11 min</td><td>三個原則、檢查什麼、規則與 AI 怎麼分工</td><td class="bar"><span style="width:60%"></span></td></tr>
+      <tr class="peak"><td class="no">03</td><td class="sec">現場示範</td><td class="time">11 – 20 min</td><td>案例：洞見日報｜正常巡檢 → 重播異常 → 實際案例 → AI 開修復 MR</td><td class="bar"><span style="width:90%"></span></td></tr>
+      <tr><td class="no">04</td><td class="sec">成本、安全與導入</td><td class="time">20 – 25 min</td><td>實測 AI 費用、資料安全、排程怎麼選、套用到你的專案</td><td class="bar"><span style="width:50%"></span></td></tr>
+      <tr><td class="no">05</td><td class="sec">Q&amp;A</td><td class="time">25 – 30 min</td><td>常見問題與交流</td><td class="bar"><span style="width:50%"></span></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 03 痛點 -->
+<section class="slide" data-notes="我們的監控其實做得不差：伺服器活著、CPU 正常、API 回 200，這些都看得到。
+但前端最難防的，是「技術上沒壞、內容上錯了」。上游少給幾筆、某個欄位變成 null、資料格式稍微一變——前端照樣渲染，不會丟錯，監控照樣全綠。
+【指上排】所以以前的流程是：問題發生，使用者先看到，客戶來反映，工程師才開始查，而且常常很難重現。
+【指下排】我們想把中間那段換掉：問題一樣會發生，但在使用者看到之前，巡檢員先發現，發 Google Chat 告訴我們是哪一頁、哪一段，負責的人去修。
+【指下方兩張卡片】左邊是監控看得到的，右邊是看不到的。今天講的就是右邊這一塊。" data-time="2.5 分鐘">
+  <div class="head">
+    <div class="eyebrow r">01 · 為什麼總是客戶先發現</div>
+    <h2 class="r">監控顯示正常，<span class="hl">不代表使用者看到的正常</span></h2>
+  </div>
+  <div class="body">
+    <div class="r">
+      <div class="tl bad">
+        <div class="who">以前<small>REACTIVE</small></div>
+        <div class="steps">
+          <div class="step"><b>資料或內容出錯</b><span>API 正常、監控全綠</span></div>
+          <div class="step hot"><b>使用者先看到</b><span>少資料、顯示 NaN、版面跑掉</span></div>
+          <div class="step hot"><b>客戶來反映</b><span>信任已受影響</span></div>
+          <div class="step"><b>工程師開始查</b><span>重現困難、耗時</span></div>
+        </div>
+      </div>
+      <div class="tl good">
+        <div class="who">導入後<small>PROACTIVE</small></div>
+        <div class="steps">
+          <div class="step"><b>資料或內容出錯</b><span>同樣的問題</span></div>
+          <div class="step hot"><b>巡檢員發現</b><span>固定時間打開實際頁面檢查</span></div>
+          <div class="step hot"><b>通知 + 修復 MR</b><span>附原文；前端 bug 附上修好的 MR</span></div>
+          <div class="step"><b>工程師審核</b><span>看 diff 後合併，使用者還沒看到</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid2 r" style="margin-top:clamp(18px,3.6vh,36px)">
+      <div class="card"><div class="k">監控看得到</div><p>伺服器狀態、API 回應碼 200、頁面打得開</p></div>
+      <div class="card"><div class="k" style="color:#C24444">監控看不到</div><p>列表少了資料、欄位顯示 NaN、資料停在昨天、HTML 殘留、版面溢出、外部連結失效</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 AI 巡檢員是什麼 -->
+<section class="slide" data-notes="巡檢員背後有三個原則，跟頁面是什麼內容無關，所以套到任何前端專案都一樣。
+第一個是「對照」。Playwright 打開實際頁面的時候，同時把 API 的回應攔下來。資料有幾筆，畫面就該有幾筆；資料有值，畫面就不該是空的。兩邊一對，不只知道有問題，還知道問題出在資料端還是前端。
+第二個是「分層」。規則負責抓確定是錯的，例如筆數不對、出現 NaN；有些問題規則寫不出來，例如文字斷在半句、內容跟標題對不上，這種就交給 Claude 讀全文判斷。
+第三個是「附證據」。通知要讓人看了就能處理：哪一頁、哪一段、原文是什麼、截圖在哪裡，收到的人不用自己重現。
+技術上就是 Node 加 Playwright，不用改受測的專案。目前用在 XQ Lab 的 THE DESK 和洞見日報。" data-time="2.5 分鐘">
+  <div class="head">
+    <div class="eyebrow r">02 · AI 巡檢員</div>
+    <h2 class="r">像使用者一樣，每天把網站走過一遍</h2>
+  </div>
+  <div class="body">
+    <div class="caps r">
+      <div class="cap"><div class="big">對照</div><div class="en">Browse · Playwright</div><h3>畫面 × 原始資料</h3><p>打開實際頁面截圖，同時攔下 API 回應。資料有幾筆畫面就該有幾筆，資料有值畫面就不該是空的。</p></div>
+      <div class="cap"><div class="big">分層</div><div class="en">Judge · 規則 + Claude</div><h3>規則守已知，AI 找未知</h3><p>規則抓確定的錯（筆數、格式、程式值外露）；規則寫不出來的語意問題，交給 Claude 讀全文判讀。</p></div>
+      <div class="cap"><div class="big"><em>證據</em></div><div class="en">Report · Google Chat</div><h3>看通知就能處理</h3><p>指出哪一頁、哪一段，附上原文引用與截圖，收到的人不用自己重現。</p></div>
+    </div>
+    <div class="facts r">
+      <span>Node + Playwright，不需改動受測專案</span>
+      <span>排程定時執行，正常也發一行心跳</span>
+      <span>已用在 XQ Lab：THE DESK、洞見日報</span>
+    </div>
+  </div>
+</section>
+
+<!-- 05 每天檢查什麼 -->
+<section class="slide" data-notes="具體檢查什麼？我整理成六類，大部分前端頁面都適用。每張卡片下面的「實例」，是我們真的寫成規則的項目。
+前五類用規則：
+筆數與完整性——洞見日報每天固定三則，10/2 有一則晚到，中間有一段時間首頁只有兩則。
+資料新鮮度——畫面還停在昨天，通常代表排程或同步斷了。
+資料轉換——前端靠格式把原始資料切開或轉換，格式一變就切錯，而且不會報錯。THE DESK 有一次分隔線被打成全形破折號，整段沒切開。
+殘留與版面——NaN、undefined、HTML 標籤外露，或內容溢出畫面。
+外部依賴——頁面引用的外部連結，原文被改標題或下架，我們這邊不會知道。
+第六類是語意異常，交給 AI：截斷、重複、段落放錯位置、標題跟內文不符。規則很難寫，但人一看就知道不對。" data-time="2 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3.4vh,36px)">
+    <div class="eyebrow r">02 · 巡檢清單</div>
+    <h2 class="r">巡檢員每天檢查什麼？</h2>
+  </div>
+  <div class="body" style="justify-content:flex-start">
+    <div class="checks r">
+      <div class="chk"><div class="top"><span class="num">01</span><span class="tag info">規則</span></div><h3>筆數與完整性</h3><p>畫面筆數和 API 對不上、列表或卡片是空的、必要欄位缺漏。</p><div class="eg">實例：首頁顯示 2 則，應為 3 則</div></div>
+      <div class="chk"><div class="top"><span class="num">02</span><span class="tag info">規則</span></div><h3>資料新鮮度</h3><p>畫面停在舊資料，排程或同步可能中斷。</p><div class="eg">實例：首頁停在前一期，不是今天</div></div>
+      <div class="chk"><div class="top"><span class="num">03</span><span class="tag info">規則</span></div><h3>資料轉換</h3><p>原始資料格式一變，前端切錯、轉錯，卻不會報錯。</p><div class="eg">實例：分隔線打成「——」，整段沒切開</div></div>
+      <div class="chk"><div class="top"><span class="num">04</span><span class="tag info">規則</span></div><h3>殘留與版面</h3><p>NaN、undefined、HTML 標籤、亂碼外露，或內容溢出畫面。</p><div class="eg">實例：行情欄位出現 undefined</div></div>
+      <div class="chk"><div class="top"><span class="num">05</span><span class="tag info">規則</span></div><h3>外部依賴</h3><p>頁面上的外部連結、引用來源是否還在、是否被改動。</p><div class="eg">實例：引用的原文被改標題、下架</div></div>
+      <div class="chk"><div class="top"><span class="num">06</span><span class="tag ok">AI</span></div><h3>語意異常</h3><p>Claude 讀全文，找規則寫不出來的問題。</p><div class="eg">實例：截斷、重複、錯置、標題與內文不符</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 06 流程 -->
+<section class="slide" data-notes="整個流程是這樣。
+第一步，排程觸發。小細節：時間要排在資料更新之後，太早跑會把「還沒更新」誤報成異常，我們一開始就踩過這個坑。
+第二步，Playwright 打開頁面、截圖、攔 API。
+第三步，先跑規則，再把全文交給 Claude。
+【指右邊】結果分兩種。正常只發一行 ✅ 心跳——這行很重要，哪天沒收到心跳，就代表排程本身掛了。
+有狀況分三種卡片：規則沒過是 🚨；規則全過、但 AI 覺得怪怪的是 🤖；外部連結有變動是 🔗。另外，如果判斷是前端程式 bug，AI 會直接修好、重新驗證，開一個 Draft MR 附在通知裡——這個等一下會示範。
+【指下方】最重要的原則：AI 只提出疑慮與修復，不做決定。AI 的發現一律記成 warn、附上原文；它開的 MR 一律是 Draft，要工程師看過 diff 才會合併。AI 會誤判，這樣設計，誤判的代價就只是多看一眼。" data-time="2 分鐘">
+  <div class="head">
+    <div class="eyebrow r">02 · 運作流程</div>
+    <h2 class="r">從排程到通知</h2>
+  </div>
+  <div class="body">
+    <div class="flow r">
+      <div class="node"><div class="s">STEP 1</div><h3>排程觸發</h3><p>排在資料更新之後的固定時間，錯過時開機後補跑。</p></div>
+      <div class="node"><div class="s">STEP 2</div><h3>打開頁面</h3><p>Playwright 走過關鍵頁面，截圖並攔下 API 原始資料。</p></div>
+      <div class="node"><div class="s">STEP 3</div><h3>規則 + AI</h3><p>規則逐項檢查，再把全文交給 Claude 找語意異常。</p></div>
+      <div class="branch">
+        <div class="node pass"><span class="tag ok">正常</span>　<span style="font-size:15px;color:var(--ink-2)">發一行 ✅ 心跳</span></div>
+        <div class="node fail">
+          <span class="tag bad">有狀況</span>
+          <ol style="margin-top:10px">
+            <li>🚨 規則沒過：列出 error</li>
+            <li>🤖 AI 有疑慮：附上原文引用</li>
+            <li>🔗 外部連結異動：附新舊標題</li>
+            <li>🔧 前端 bug：AI 修好、重驗、開 Draft MR</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+    <div class="guard r"><span class="tag">原則</span><p><b>AI 只提出疑慮與修復，不做決定。</b>AI 的發現一律記為 warn 並附上原文；修復只開 Draft MR，由工程師審核後才合併。</p></div>
+  </div>
+</section>
+
+<!-- 07 Demo 1 -->
+<section class="slide dark" data-notes="接下來現場示範，用洞見日報當案例。
+簡單介紹：洞見日報每天固定三則分析文章，內容從 API 來，前端把原始資料轉成重點、內文、引註和來源。換成你的專案，就是把「三則文章」換成你的列表、報表或卡片。
+【動作】切到終端機，執行 node monitor-dailyinsight.mjs --headed --no-links
+--headed 會開出看得到的瀏覽器，大家可以看到它自己打開首頁、一則一則點進去、截圖。--no-links 是先跳過外部連結檢查，現場比較快。
+【等它跑完】結果 OK，error 0、warn 0。
+【動作】打開輸出資料夾：report.json 是檢查結果，每一頁都有截圖。之後有問題，回頭看截圖就知道當時畫面長什麼樣子。
+【備案】網路不通的話，直接打開事先跑好的 .monitor\dailyinsight 資料夾。" data-time="1.5 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3vh,30px)">
+    <div class="eyebrow r">03 · 案例：洞見日報 · 1 / 4</div>
+    <h2 class="r">正常巡檢　<span class="muted" style="font-weight:600;font-size:.55em">約 1 分鐘</span></h2>
+  </div>
+  <div class="demo r">
+    <div class="term">
+      <div class="ttl"><i></i><i></i><i></i><em>terminal — monitor-dailyinsight.mjs</em></div>
+      <div class="out">
+        <div class="ln" style="transition-delay:.3s"><span class="p">$</span> node monitor-dailyinsight.mjs --headed --no-links</div>
+        <div class="ln d" style="transition-delay:.9s">[monitor] https://xqtestweb2.xq.com.tw/xq.lab/dailyinsight/</div>
+        <div class="ln g" style="transition-delay:1.6s">[monitor] 期別 20261002：OK（error 0、warn 0）</div>
+        <div class="ln d" style="transition-delay:2.0s">[monitor] 報告：.monitor\dailyinsight\20261002-110116\report.json</div>
+        <div class="ln" style="transition-delay:2.4s"><span class="p">$</span> <span class="cursor"></span></div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="card"><div class="k">旁邊的瀏覽器</div><h3>首頁 → 第 1、2、3 則閱讀頁</h3><p class="muted">--headed 讓 Playwright 開出看得到的瀏覽器，逐頁點進去、截圖，全程可見。</p></div>
+      <div class="gl">
+        <div class="bar"><span>.monitor\dailyinsight\20261002-110116\</span><span>5 個檔案</span></div>
+        <div class="diff">
+          <div class="c">report.json　　檢查結果、原稿摘要</div>
+          <div class="c">home.png　　　 首頁截圖</div>
+          <div class="c">article-1.png　閱讀頁截圖 × 3</div>
+          <div class="c">article-2.png</div>
+          <div class="c">article-3.png</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 08 Demo 2 -->
+<section class="slide dark" data-notes="正常的看完了，來看有問題的。
+我拿 10/2 的真實資料動了手腳：把一則的結尾截斷、把本篇重點的方向寫反、把別則的段落貼進來，再留一段編輯備註。這些都是「格式正確、內容錯誤」的問題。
+【動作】執行 node monitor-dailyinsight.mjs --no-links --ai --mock .monitor/ai-trial-di-faults.json --today 20261002
+--mock 用這份檔案取代 API 回應，--today 假裝今天是 10/2，--ai 開啟 Claude 判讀。
+【等規則結果】先看規則：error 是 0。格式都對，規則挑不出毛病。
+【等 AI，約 17 秒】AI 找出五處問題：第 1 則結尾斷在半句；第 2 則的重點說外銷訂單「大減」，內文卻是「暴增 65.8%」；第 2 則的小標底下混入美國 PCE 的段落，而且跟第 3 則逐字相同；第 3 則留有編輯備註。
+每一處都指出第幾則、哪個小標底下、是什麼類型，收到的人可以直接去改。
+順帶一提：AI 每次的用詞不會完全一樣，這也是它的結果只記 warn 的原因。
+【備案】AI 太慢或失敗，打開 .monitor\ai-trial\20261005-115428\report.json。" data-time="3 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3vh,30px)">
+    <div class="eyebrow r">03 · 案例：洞見日報 · 2 / 4</div>
+    <h2 class="r">重播異常資料，規則沒抓到的 AI 抓到　<span class="muted" style="font-weight:600;font-size:.55em">約 3 分鐘</span></h2>
+  </div>
+  <div class="demo r">
+    <div class="term">
+      <div class="ttl"><i></i><i></i><i></i><em>terminal — --mock --ai</em></div>
+      <div class="out">
+        <div class="ln" style="transition-delay:.3s"><span class="p">$</span> node monitor-dailyinsight.mjs --no-links --ai \</div>
+        <div class="ln" style="transition-delay:.3s">    --mock .monitor/ai-trial-di-faults.json --today 20261002</div>
+        <div class="ln d" style="transition-delay:.9s">[monitor] https://xqtestweb2.xq.com.tw/xq.lab/dailyinsight/（mock：…di-faults.json）</div>
+        <div class="ln y" style="transition-delay:1.4s">[monitor] 期別 20261002：OK（error 0、warn 6）</div>
+        <div class="ln d" style="transition-delay:1.7s">  [warn] raw: 第 1 則 來源 [12] 內文沒有引用</div>
+        <div class="ln e" style="transition-delay:2.1s">  [warn] ai: 🤖 第 1 則【截斷】文章最後一段斷在半句</div>
+        <div class="ln e" style="transition-delay:2.3s">  [warn] ai: 🤖 第 2 則 本篇重點【不一致】說外銷訂單「大減」，內文卻是「暴增 65.8%」</div>
+        <div class="ln e" style="transition-delay:2.5s">  [warn] ai: 🤖 第 2 則【錯置】鋼鐵出口的小標下混入美國 PCE 段落</div>
+        <div class="ln e" style="transition-delay:2.7s">  [warn] ai: 🤖 第 2 則【重複】這段與第 3 則第一段逐字相同</div>
+        <div class="ln e" style="transition-delay:2.9s">  [warn] ai: 🤖 第 3 則【殘留】內文留有 AI 生成的編輯備註</div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="card">
+        <div class="badge-step">模擬情境</div>
+        <h3>格式全對，內容是錯的</h3>
+        <p style="margin-top:8px">拿 10/2 的真實稿件動手腳：截斷結尾、重點方向寫反、混入別則段落、留下編輯備註。</p>
+      </div>
+      <div class="card">
+        <div class="badge-step">規則 vs AI</div>
+        <ul>
+          <li>規則：<b>error 0</b>，格式挑不出毛病</li>
+          <li>AI：找出 <b>5 處</b>，每處指出第幾則、哪一段</li>
+          <li>判讀約 17 秒，結果只記 warn</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 09 Demo 3 -->
+<section class="slide dark" data-notes="剛剛是模擬的，最後看一個真的。
+這是 10/5 洞見日報的正式資料。第 3 則上稿時，內文漏掉了所有引註標記。前端完全沒有報錯，畫面看起來也很正常，唯一的差別是右邊 7 則新聞來源，讀者一則都點不到。這種問題人工檢查很容易漏掉。
+規則直接判定 error。同一次執行，AI 還發現第 2 則有一段講中國內需，引用的卻是台灣商場和批發業的新聞，來源張冠李戴。
+【指右邊卡片】這就是 Google Chat 收到的卡片：標題直接告訴你哪一天、哪個產品異常；Error 和 AI 判讀分開列，AI 的部分附上原文引用。看完這張卡片，就知道要找誰、改哪裡。" data-time="2 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3vh,30px)">
+    <div class="eyebrow r">03 · 案例：洞見日報 · 3 / 4</div>
+    <h2 class="r">實際案例：10/5 正式資料　<span class="muted" style="font-weight:600;font-size:.55em">約 2 分鐘</span></h2>
+  </div>
+  <div class="demo r">
+    <div class="term">
+      <div class="ttl"><i></i><i></i><i></i><em>terminal — 10/5 洞見日報</em></div>
+      <div class="out">
+        <div class="ln" style="transition-delay:.3s"><span class="p">$</span> node monitor-dailyinsight.mjs --ai --notify</div>
+        <div class="ln d" style="transition-delay:.9s">[monitor] https://xqtestweb2.xq.com.tw/xq.lab/dailyinsight/</div>
+        <div class="ln e" style="transition-delay:1.4s">[monitor] 期別 20261005：FAIL（error 1、warn 3）</div>
+        <div class="ln e" style="transition-delay:1.7s">  [error] raw: 第 3 則 內文完全沒有引註，</div>
+        <div class="ln e" style="transition-delay:1.7s">          7 則新聞來源在畫面上都看不到</div>
+        <div class="ln y" style="transition-delay:2.1s">  [warn] ai: 🤖 第 2 則【引註】中國內需的段落，</div>
+        <div class="ln y" style="transition-delay:2.1s">          引用的卻是台灣商場、批發業的新聞</div>
+        <div class="ln y" style="transition-delay:2.4s">  [warn] ai: 🤖 第 2 則【格式】小標沒套格式，混在內文</div>
+        <div class="ln g" style="transition-delay:2.8s">[monitor] 已發送 Google Chat 通知</div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="gl">
+        <div class="bar"><span>Google Chat</span><span>xqlab-monitor</span></div>
+        <div class="mr"><div class="ic" style="background:rgba(226,90,90,.12);border-color:var(--bad)"></div><div><b>🚨 洞見日報 20261005 內容異常</b><small>error 1、warn 0 · 2026/10/5 12:00:17</small></div></div>
+        <div class="diff">
+          <div class="c">Error</div>
+          <div class="m">● 第 3 則 內文完全沒有引註，7 則新聞來源在畫面上都看不到</div>
+          <div class="c">AI 判讀（僅供參考）</div>
+          <div class="a" style="background:#FDF4E3;color:#8A5A00">● 第 2 則【引註】引用的 [10][11][12] 與中國內需無關</div>
+          <div class="a" style="background:#FDF4E3;color:#8A5A00">　「部分商場中秋檔期出現雙位數成長…」</div>
+        </div>
+      </div>
+      <p class="quote-big">頁面沒有任何錯誤訊息，<br><span class="hl">巡檢員指出第幾則、哪一段，直接找編輯修正。</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- 09b Demo 4 -->
+<section class="slide dark" data-notes="前面三個都是內容或上稿的問題，要找編輯修。最後看另一種：前端程式自己的 bug。
+【動作】先看畫面：我在 Demo 專案埋了一個 bug，一個看起來很合理的重構——引註 id 改成只認 8 碼以上的 guid。結果畫面上所有引註上標和右側來源卡片都消失了，頁面沒有任何錯誤訊息。
+巡檢員一跑：原始資料檢查全過，閱讀頁卻是 3 則都「原始資料有引註，閱讀頁卻沒有可點的引註」。原始資料對、畫面錯，代表是前端程式的問題。
+【動作】執行 node autofix.mjs --report latest --repo ../xq-lab-demo --verify --push
+它會在獨立的 git worktree 開修復分支，把巡檢結果和最近的 commit 交給 Claude。Claude 只有讀檔和編輯的權限，不能執行指令，也碰不到 git 遠端。
+【等 Claude，約 30 秒】Claude 找到原因：最近那個 commit 把正規式改成 8 碼，但 api.ts 產生的 id 是補零到 6 碼，所以一個都對不上。修法是改回 {6,}，一行。
+接著腳本自己跑型別檢查，再用修好的程式起 dev server、用同一份資料重新巡檢，原本 3 個 error 都消失了，才 commit、push、開 Draft MR。
+【切到 GitLab】這就是 AI 開的 MR：標題、原因、diff 一目了然，改動就一行。工程師要做的只剩審核——看懂了就 Mark as ready、Merge。
+【備案】Claude 太慢或失敗，打開事先跑好的 MR 頁面。" data-time="3 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3vh,30px)">
+    <div class="eyebrow r">03 · 案例：洞見日報 · 4 / 4</div>
+    <h2 class="r">前端 bug，AI 開好修復 MR　<span class="muted" style="font-weight:600;font-size:.55em">約 3 分鐘</span></h2>
+  </div>
+  <div class="demo r">
+    <div class="term">
+      <div class="ttl"><i></i><i></i><i></i><em>terminal — autofix.mjs</em></div>
+      <div class="out">
+        <div class="ln" style="transition-delay:.3s"><span class="p">$</span> node autofix.mjs --report latest --repo ../xq-lab-demo --verify --push</div>
+        <div class="ln y" style="transition-delay:.8s">[autofix] 原始資料檢查全過、畫面有 3 個 error → 判定為前端程式 bug</div>
+        <div class="ln d" style="transition-delay:1.1s">[autofix]   - 第 1～3 則 原始資料有引註，閱讀頁卻沒有任何可點的引註</div>
+        <div class="ln d" style="transition-delay:1.4s">[autofix] 建立修復分支 fix/ai-dailyinsight-…</div>
+        <div class="ln" style="transition-delay:1.8s">[autofix] 🧠 Claude 分析原因、修改程式中…　完成，26 秒、約 $0.25</div>
+        <div class="ln d" style="transition-delay:2.2s">[autofix]   原因：引註 id 正規式改成只認 8 碼，但 id 是補零到 6 碼</div>
+        <div class="ln d" style="transition-delay:2.4s">[autofix]   修改：content.ts 的正規式從 {8,} 改回 {6,}</div>
+        <div class="ln" style="transition-delay:2.8s">[autofix] 🔎 型別檢查（nx typecheck）…　<span class="g">通過</span></div>
+        <div class="ln" style="transition-delay:3.2s">[autofix] 🔁 用修好的程式重新巡檢…　<span class="g">原本的 3 個 error 都消失了</span></div>
+        <div class="ln g" style="transition-delay:3.6s">[autofix] 🚀 push 並開 Draft MR → main</div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="gl">
+        <div class="bar"><span>GitLab · xq-lab-demo</span><span>Merge request</span></div>
+        <div class="mr"><div class="ic"></div><div><b>Draft: [AI 修復] 引註 id 正規式改回 6 碼</b><small>fix/ai-dailyinsight-… → main · ai-autofix</small></div></div>
+        <div class="diff">
+          <div class="c">@@ apps/dailyinsight/src/engine/content.ts @@</div>
+          <div class="m">-    const ids = match[0].match(/[a-f0-9]{8,}/gi) ?? [];</div>
+          <div class="a">+    const ids = match[0].match(/[a-f0-9]{6,}/gi) ?? [];</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="badge-step">AI 碰不到的</div>
+        <ul>
+          <li>不能執行指令、碰不到 git 遠端</li>
+          <li>只准改 apps/dailyinsight/src</li>
+          <li>型別檢查 + 重新巡檢都過才開 MR</li>
+          <li>一律 Draft，<b>由工程師審核合併</b></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 成本與安全 -->
+<section class="slide" data-notes="大家應該會關心成本，這頁都是實測數字。
+claude -p 每次判讀會回報等值費用：洞見日報大約 0.18 美元，THE DESK 大約 0.15 美元，一次 10 到 18 秒。兩個產品每個平日各跑一次，一個月大約 44 次，換算約 8 美元。目前用本機的 Claude 登入執行，沒有另外的 API 帳單；規則檢查本身完全不花 AI 費用。
+安全方面兩點。
+第一，只讀不寫：巡檢只瀏覽頁面；AI 只拿到傳進去的全文，權限設成 dontAsk，要寫檔或執行指令一律拒絕，排程沒人在場也不會卡住。
+第二，資料範圍：目前送給 AI 的都是已公開的內容，不含個資；要套到有個資的頁面，得先遮蔽。截圖和報告留在本機，30 天自動清除。" data-time="2 分鐘">
+  <div class="head">
+    <div class="eyebrow r">04 · 成本與安全</div>
+    <h2 class="r">每月 AI 判讀，<span class="hl">等值約 8 美元</span></h2>
+  </div>
+  <div class="body">
+    <div class="stats r">
+      <div class="stat"><div class="v">44<small>次 / 月</small></div><div class="l">AI 判讀次數</div><div class="f">2 個產品 × 每平日 1 次 × 22 天</div></div>
+      <div class="stat"><div class="v">≈ $0.17</div><div class="l">單次 AI 判讀（實測）</div><div class="f">claude -p 回報等值費用，約 10–18 秒</div></div>
+      <div class="stat"><div class="v acc">≈ $8<small>/ 月</small></div><div class="l">每月等值費用</div><div class="f">目前走本機 Claude 登入，無額外 API 帳單</div></div>
+    </div>
+    <p class="note-s r">＊單次費用取 10/5 實測：洞見日報約 $0.18、THE DESK 約 $0.15；規則檢查不花 AI 費用。</p>
+    <div class="sec-list r">
+      <div class="sec-item">
+        <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></div>
+        <div><h3>只讀不寫</h3><p>巡檢只瀏覽公開頁面、不需登入；AI 只收 stdin 全文，權限設為 dontAsk，寫檔與執行指令一律拒絕。</p></div>
+      </div>
+      <div class="sec-item">
+        <div class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <div><h3>資料範圍</h3><p>目前送給 AI 的只有已公開的頁面內文，不含個資；套用到有個資的頁面時要先遮蔽。截圖與報告留在本機，30 天自動清除。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10b 排程怎麼選 -->
+<section class="slide" data-notes="講導入之前，先補充一個大家常問的：排程要用什麼跑？我自己試過四種，差別可以先用一個問題分清楚——排程叫起來的是「固定的腳本」，還是「AI agent」？
+【指左兩欄】Windows 工作排程器和 GitLab CI 是第一種：每天跑同一支腳本，規則固定，AI 只負責判讀那一步。每次檢查的項目都一樣，AI 只呼叫一次，成本可以預估。
+【指第三欄】公司已經有 n8n，它也是「流程固定」的那一種，排程、重試、通知都很方便，主機在內網也連得到測試站。但要注意：n8n 2.0 起 Execute Command 節點預設停用，要直接跑我們的 Playwright 腳本，得請管理員開放，n8n 主機也要裝好瀏覽器；AI 判讀也沒有本機登入，要改用 API 金鑰。比較實際的分工是：n8n 負責排程與通知，用 HTTP 觸發 GitLab pipeline 或 SSH 到裝好環境的主機去跑腳本。
+【指右欄】最後是第二種：Claude Code 和 Codex 的排程，兩家做法很像：每次開一個 AI agent，照著提示自己決定要打開哪些頁面、檢查什麼。好處是不用寫程式，壞處是每次檢查的範圍取決於 AI 當次的判斷，而且整個 agent 過程都在耗 token。
+兩家都分本機和雲端：本機版要 App 開著、電腦醒著，Claude Desktop 錯過的話開機後補跑一次；雲端版電腦關了也會跑，但它是乾淨環境，拿不到本機檔案，也不一定連得到內網。Codex 本機版還要注意權限：workspace-write 模式會擋網路，要打開頁面就得給完整權限。
+GitLab CI 的重點是 Runner：要連內網測試站，Runner 得架在內網；CI 裡沒有我的 Claude 登入，要改用 API 金鑰，按量計費。
+【指下方】所以我們的選擇是：排程跑固定腳本，AI 只做判讀。試行期用 Windows，正式版搬到 GitLab CI。Claude Code 和 Codex 也有用到，但是用在「寫」巡檢員——新增規則、改腳本——而不是每天「當」巡檢員。" data-time="3 分鐘">
+  <div class="head" style="margin-bottom:clamp(14px,2.6vh,28px)">
+    <div class="eyebrow r">04 · 排程怎麼選</div>
+    <h2 class="r">排程叫起來的，是<span class="hl">腳本</span>還是 <span class="hl">AI agent</span>？</h2>
+  </div>
+  <div class="body" style="justify-content:flex-start">
+    <table class="cmp r">
+      <thead>
+        <tr><th></th><th>Windows 工作排程器<span class="tag info">目前</span></th><th>GitLab CI 排程<span class="tag ok">下一步</span></th><th>n8n 工作流程<span class="tag info">公司已有</span></th><th>Claude Code／Codex 排程</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>執行方式</th><td>跑固定腳本，AI 只負責判讀</td><td>跑固定腳本，AI 只負責判讀</td><td>串接節點的工作流程；瀏覽器檢查仍要另外跑</td><td>AI agent 依提示自己執行</td></tr>
+        <tr><th>跑在哪</th><td>本機</td><td>GitLab Runner</td><td>公司自架的 n8n 主機</td><td>本機（Claude Desktop／Codex App）或雲端</td></tr>
+        <tr><th>電腦要開著</th><td>要，錯過開機補跑</td><td class="y">不用</td><td class="y">不用</td><td>本機要／雲端不用</td></tr>
+        <tr><th>內網與本機檔案</th><td class="y">可以</td><td>看 Runner 架在哪</td><td>主機在內網就可以</td><td>本機可以／雲端不行</td></tr>
+        <tr><th>AI 費用</th><td>本機 Claude 登入，無額外帳單</td><td>API 金鑰，按量計費</td><td>API 金鑰，按量計費</td><td>計入訂閱用量，整段 agent 都耗 token</td></tr>
+        <tr><th>每次檢查一致</th><td class="y">是，規則固定</td><td class="y">是，規則固定</td><td class="y">是，流程固定</td><td class="n">依 AI 當次判斷</td></tr>
+        <tr><th>適合</th><td>試行、個人使用</td><td>正式上線、團隊共用</td><td>排程與通知的中樞、串多個系統</td><td>探索性檢查、不想寫程式</td></tr>
+      </tbody>
+    </table>
+    <div class="guard r" style="margin-top:clamp(14px,2.8vh,30px)"><span class="tag">我們的選擇</span><p><b>排程跑固定腳本，AI 只做判讀。</b>試行用 Windows、正式搬 GitLab CI；Claude Code 與 Codex 用來「寫」巡檢員，不是每天「當」巡檢員。</p></div>
+  </div>
+</section>
+
+<!-- 11 下一步 -->
+<section class="slide" data-notes="目前的進度分三個階段。
+第一階段已經完成：兩個產品每天在跑，也真的抓到問題了。
+第二階段是現在在做的：AI 判讀還在試行，所以結果先只記 warn。接下來累積案例，把 AI 一再抓到、模式穩定的問題改寫成規則——AI 負責找新問題，規則負責守住舊問題。也會補上「異常時重測一次」來降低誤報。
+第三階段是搬到 GitLab CI 排程，不再綁在我的電腦上；剛剛示範的自動修復目前只在 Demo 專案跑，穩定後再開放到 develop 分支，MR 一樣是 Draft、由工程師審核。" data-time="1.5 分鐘">
+  <div class="head">
+    <div class="eyebrow r">04 · 進度與下一步</div>
+    <h2 class="r">三個階段，第一步已經在跑</h2>
+  </div>
+  <div class="body">
+    <div class="road r">
+      <div class="phase"><div class="pin">01</div><div class="k">已完成 · 先求有</div><h3>兩個產品每天巡檢</h3><p>THE DESK、洞見日報接上排程與 Google Chat 通知，已實際抓到問題。</p><div class="ex">規則檢查 + 來源連結檢查</div></div>
+      <div class="phase"><div class="pin">02</div><div class="k">進行中 · 降低誤報</div><h3>AI 判讀試行</h3><p>AI 結果先只記 warn；累積案例後，把模式穩定的發現改寫成規則，並補上異常重測。</p><div class="ex">AI 找新問題，規則守住舊問題</div></div>
+      <div class="phase"><div class="pin">03</div><div class="k">下一步 · 擴大</div><h3>搬上 CI、開放修復 MR</h3><p>移到 GitLab CI 排程，不綁個人電腦；自動修復已在 Demo 專案驗證，下一步開放到 develop。</p><div class="ex">MR 一律 Draft，由工程師審核</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 11b 套用到你的專案 -->
+<section class="slide" data-notes="如果你想套到自己的專案，要準備什麼？
+第一，定義「正確」長什麼樣子：頁面網址、呼叫哪些 API、應該有幾筆、哪些欄位必填、幾點之後算遲到。老實說這一步最花時間，需要找熟悉這個頁面的人一起整理。
+第二，寫一支監控：打開頁面、攔 API、寫這個頁面專屬的規則。我們現有的兩支各約 500 行，大部分都是規則本身。
+第三，接上排程和通知。建議先只開心跳，觀察一兩週誤報，穩定後再加 AI。
+截圖、報告、通知、AI 判讀這些共用的部分都已經在 lib.mjs，有興趣的話會後可以找我。" data-time="1.5 分鐘">
+  <div class="head">
+    <div class="eyebrow r">04 · 套用到你的專案</div>
+    <h2 class="r">接一個新頁面，要準備什麼？</h2>
+  </div>
+  <div class="body">
+    <div class="grid3 r">
+      <div class="card"><div class="k">01 · 準備</div><h3>定義「正確」長什麼樣子</h3><ul style="padding-left:1.1em"><li>頁面網址、呼叫哪些 API</li><li>應該有幾筆、哪些欄位必填</li><li>多久更新一次、幾點之後算遲到</li></ul></div>
+      <div class="card"><div class="k">02 · 撰寫</div><h3>一支 monitor-&lt;app&gt;.mjs</h3><ul style="padding-left:1.1em"><li>打開頁面、攔下 API 回應</li><li>寫這個頁面專屬的規則</li><li>現有兩支各約 500 行，多半是規則</li></ul></div>
+      <div class="card"><div class="k">03 · 上線</div><h3>接上排程與通知</h3><ul style="padding-left:1.1em"><li>排程時間設在資料更新之後</li><li>先開心跳，觀察一兩週誤報</li><li>穩定後再加上 AI 判讀</li></ul></div>
+    </div>
+    <div class="guard r"><span class="tag">共用</span><p><b>截圖、報告、Google Chat 通知、AI 判讀、心跳</b>都在 lib.mjs，新頁面只需要寫自己的規則。</p></div>
+  </div>
+</section>
+
+<!-- 12 結尾 -->
+<section class="slide dark closing" data-notes="總結一句話：在客戶發現之前，先把問題找出來。
+規則守住已知的錯，AI 找出規則寫不出來的；前端 bug 由 AI 備好修復 MR，最後由工程師做決定。" data-time="0.5 分鐘">
+  <div class="eyebrow r">Takeaway</div>
+  <h1 class="r">在客戶發現之前，<br><span class="soft">先把問題找出來。</span></h1>
+  <p class="lead r" style="margin-top:32px">讓 <span class="hl" style="font-weight:700">AI 巡檢員</span>每天替團隊把網站走一遍——規則守住已知的錯，AI 找出規則寫不出來的，前端 bug 備好修復 MR，由工程師做最後決定。</p>
+</section>
+
+<!-- 13 Q&A -->
+<section class="slide" data-notes="先整理三個常被問到的問題。
+Q1 AI 會不會誤判？會，所以它的結果只記 warn，而且一定附原文引用；只有規則沒過才算異常。
+Q2 為什麼不全部用規則？規則抓得到格式，抓不到語意。剛剛示範的五處問題，規則一個都沒抓到。
+Q3 AI 開的 MR 會不會改壞東西？AI 只能讀檔和編輯，不能執行指令，也碰不到 git 遠端；只准改該 app 的原始碼，改完要過型別檢查和重新巡檢，最後只開 Draft MR，由工程師審核才合併。
+其他問題歡迎提出來。" data-time="5 分鐘">
+  <div class="head" style="margin-bottom:clamp(16px,3vh,32px)">
+    <div class="eyebrow r">05 · Q&amp;A</div>
+    <h2 class="r">常見問題</h2>
+  </div>
+  <div class="body" style="justify-content:flex-start">
+    <div class="qa r">
+      <div class="qa-item"><div class="qn">Q1</div><h3>AI 會不會誤判，造成誤報？</h3><p>會，所以 <b>AI 的結果一律只記 warn</b>，而且必須附上原文引用；只有規則沒過才算異常。看卡片就能判斷是不是真的問題。</p></div>
+      <div class="qa-item"><div class="qn">Q2</div><h3>為什麼不全部用規則就好？</h3><p>規則抓得到<b>格式</b>（符號、編號、則數），抓不到<b>語意</b>：截斷、重複、段落貼錯則、引註張冠李戴。示範的五處問題，規則一個都沒抓到。</p></div>
+      <div class="qa-item"><div class="qn">Q3</div><h3>AI 開的 MR 會不會改壞東西？</h3><p>AI <b>只能讀檔和編輯</b>，不能執行指令、碰不到 git 遠端；只准改該 app 的原始碼，改完要過型別檢查和<b>重新巡檢</b>，最後只開 Draft MR，由工程師審核才合併。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 Thanks -->
+<section class="slide dark closing" data-notes="謝謝大家。有興趣套到自己專案的，會後歡迎找我聊。">
+  <div class="eyebrow r">Thank you</div>
+  <h1 class="r">謝謝聆聽<br><span class="soft">歡迎提問與交流</span></h1>
+  <p class="lead r" style="margin-top:32px">AI 巡檢員——每天自動打開網頁、檢查內容，在客戶發現之前找出問題。</p>
+</section>
+
+</main>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const total = slides.length;
+  const pad = n => String(n).padStart(2, '0');
+  const $cur = document.getElementById('cur');
+  const $prog = document.getElementById('progress');
+  const $notes = document.getElementById('notes');
+  const $notesBody = document.getElementById('notesBody');
+  const $hint = document.getElementById('hint');
+  const $notesLbl = document.getElementById('notesLbl');
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  document.getElementById('tot').textContent = pad(total);
+
+  let idx = 0;
+  const fromHash = parseInt(location.hash.slice(1), 10);
+  if (fromHash >= 1 && fromHash <= total) idx = fromHash - 1;
+
+  function go(n) {
+    n = Math.max(0, Math.min(total - 1, n));
+    slides.forEach((s, i) => {
+      s.classList.toggle('active', i === n);
+      s.classList.toggle('prev', i < n);
+    });
+    idx = n;
+    $cur.textContent = pad(n + 1);
+    $prog.style.width = ((n + 1) / total * 100) + '%';
+    document.body.classList.toggle('on-dark', slides[n].classList.contains('dark'));
+    $notesBody.innerHTML = esc(slides[n].dataset.notes || '—').replace(/【[^】]*】/g, m => `<span class="cue">${m}</span>`);
+    $notesBody.scrollTop = 0;
+    $notesLbl.textContent = `Speaker Notes · 講稿 · ${pad(n + 1)} / ${pad(total)}${slides[n].dataset.time ? ` · 約 ${slides[n].dataset.time}` : ''}`;
+    history.replaceState(null, '', '#' + (n + 1));
+  }
+
+  function fullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ': case 'Enter':
+        e.preventDefault(); e.shiftKey && e.key === ' ' ? go(idx - 1) : go(idx + 1); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace':
+        e.preventDefault(); go(idx - 1); break;
+      case 'Home': e.preventDefault(); go(0); break;
+      case 'End': e.preventDefault(); go(total - 1); break;
+      case 'f': case 'F': fullscreen(); break;
+      case 'n': case 'N': if (e.shiftKey) $notes.classList.toggle('open'); break; // Shift+N，避免誤觸
+      case 'Escape': $notes.classList.remove('open'); break;
+    }
+  });
+
+  // 觸控滑動
+  let tx = null, ty = null;
+  document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (tx === null) return;
+    const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) go(idx + (dx < 0 ? 1 : -1));
+    tx = null;
+  }, { passive: true });
+
+  // 滑鼠滾輪（節流）
+  let wheelLock = false;
+  document.addEventListener('wheel', e => {
+    if (wheelLock || Math.abs(e.deltaY) < 30 || $notes.contains(e.target)) return;
+    const s = slides[idx];
+    if (s.scrollHeight > s.clientHeight + 4) return; // 小螢幕可捲動時不搶滾輪
+    wheelLock = true; go(idx + (e.deltaY > 0 ? 1 : -1));
+    setTimeout(() => wheelLock = false, 700);
+  }, { passive: true });
+
+  window.addEventListener('hashchange', () => {
+    const h = parseInt(location.hash.slice(1), 10);
+    if (h >= 1 && h <= total && h - 1 !== idx) go(h - 1);
+  });
+
+  setTimeout(() => $hint.classList.add('hide'), 6000);
+  go(idx);
+})();
+</script>
+</body>
+</html>
